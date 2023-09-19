@@ -460,437 +460,362 @@ __exportStar(require("./compat/DyamicUI"), exports);
 },{"./base/index":7,"./compat/DyamicUI":16,"./generated/_exports":60}],62:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.eHentai = exports.eHentaiInfo = void 0;
+exports.ScanMangaVF = exports.ScanMangaVFInfo = void 0;
 const types_1 = require("@paperback/types");
-const eHentaiHelper_1 = require("./eHentaiHelper");
-const eHentaiParser_1 = require("./eHentaiParser");
-const eHentaiSettings_1 = require("./eHentaiSettings");
-exports.eHentaiInfo = {
-    version: '1.0.2',
-    name: 'E-Hentai',
-    icon: 'icon.png',
-    author: 'loik9081',
-    description: 'Extension to grab galleries from E-Hentai',
-    contentRating: types_1.ContentRating.ADULT,
-    websiteBaseURL: 'https://e-hentai.org',
-    authorWebsite: 'https://github.com/loik9081',
-    sourceTags: [{
-            text: '18+',
-            type: types_1.BadgeColor.RED
-        }],
-    intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.HOMEPAGE_SECTIONS
+const ScanMangaVFParser_1 = require("./ScanMangaVFParser");
+exports.ScanMangaVFInfo = {
+    version: "1.0.0",
+    name: "ScanMangaVF",
+    icon: "navalex.png",
+    author: "Navalex",
+    authorWebsite: "https://github.com/navalex",
+    description: "Extension to use scanmanga-vf french website",
+    contentRating: types_1.ContentRating.EVERYONE,
+    websiteBaseURL: ScanMangaVFParser_1.DOMAIN,
+    sourceTags: [
+        {
+            text: "Fench",
+            type: types_1.BadgeColor.BLUE,
+        },
+    ],
+    intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.HOMEPAGE_SECTIONS | types_1.SourceIntents.CLOUDFLARE_BYPASS_REQUIRED,
 };
-class eHentai {
+class ScanMangaVF {
     constructor(cheerio) {
         this.cheerio = cheerio;
         this.requestManager = App.createRequestManager({
-            requestsPerSecond: 3,
-            requestTimeout: 15000,
+            requestsPerSecond: 4,
+            requestTimeout: 300000,
             interceptor: {
                 interceptRequest: async (request) => {
                     request.headers = {
                         ...(request.headers ?? {}),
                         ...{
-                            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15',
-                            'referer': 'https://e-hentai.org/'
-                        }
+                            "user-agent": await this.requestManager.getDefaultUserAgent(),
+                            referer: `${ScanMangaVFParser_1.DOMAIN}/`,
+                        },
                     };
-                    request.cookies = [App.createCookie({ name: 'nw', value: '1', domain: 'https://e-hentai.org/' })];
                     return request;
                 },
-                interceptResponse: async (response) => { return response; },
-            }
+                interceptResponse: async (response) => {
+                    return response;
+                },
+            },
         });
-        this.stateManager = App.createSourceStateManager();
     }
     getMangaShareUrl(mangaId) {
-        return `https://e-hentai.org/g/${mangaId}`;
+        return `${ScanMangaVFParser_1.DOMAIN}/manga/${mangaId}`;
     }
     async getSearchTags() {
-        return [App.createTagSection({
-                id: 'categories', label: 'Categories', tags: [
-                    App.createTag({ id: 'category:2', label: 'Doujinshi' }),
-                    App.createTag({ id: 'category:4', label: 'Manga' }),
-                    App.createTag({ id: 'category:8', label: 'Artist CG' }),
-                    App.createTag({ id: 'category:16', label: 'Game CG' }),
-                    App.createTag({ id: 'category:256', label: 'Non-H' }),
-                    App.createTag({ id: 'category:32', label: 'Image Set' }),
-                    App.createTag({ id: 'category:512', label: 'Western' }),
-                    App.createTag({ id: 'category:64', label: 'Cosplay' }),
-                    App.createTag({ id: 'category:128', label: 'Asian Porn' }),
-                    App.createTag({ id: 'category:1', label: 'Misc' })
-                ]
-            })];
-    }
-    async supportsTagExclusion() {
-        return true;
+        const request = App.createRequest({
+            url: `${ScanMangaVFParser_1.DOMAIN}/manga-list`,
+            method: "GET",
+        });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        const tags = (0, ScanMangaVFParser_1.getTags)($);
+        return [
+            App.createTagSection({
+                id: "genres",
+                label: "Genres",
+                tags: tags ?? [],
+            }),
+        ];
     }
     async getHomePageSections(sectionCallback) {
-        for (const tag of (await this.getSearchTags())[0]?.tags ?? []) {
-            const section = App.createHomeSection({
-                id: tag.id,
-                title: tag.label,
-                containsMoreItems: true,
-                type: types_1.HomeSectionType.singleRowNormal
-            });
-            sectionCallback(section);
-            (0, eHentaiHelper_1.getSearchData)('', 0, 1023 - parseInt(tag.id.substring(9)), this.requestManager, this.cheerio, this.stateManager).then(manga => {
-                section.items = manga;
-                sectionCallback(section);
-            });
-        }
-    }
-    // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
-    async getViewMoreItems(homepageSectionId, metadata) {
-        const page = metadata?.page ?? 0;
-        let stopSearch = metadata?.stopSearch ?? false;
-        if (stopSearch)
-            return App.createPagedResults({
-                results: [],
-                metadata: {
-                    stopSearch: true
-                }
-            });
-        const results = await (0, eHentaiHelper_1.getSearchData)('', page, 1023 - parseInt(homepageSectionId.substring(9)), this.requestManager, this.cheerio, this.stateManager);
-        if (results[results.length - 1]?.mangaId == 'stopSearch') {
-            results.pop();
-            stopSearch = true;
-        }
-        return App.createPagedResults({
-            results: results,
-            metadata: {
-                page: page + 1,
-                stopSearch: stopSearch
-            }
+        const section1 = App.createHomeSection({
+            id: "latest_popular_manga",
+            title: "Dernier Manga Populaire",
+            containsMoreItems: false,
+            type: types_1.HomeSectionType.featured,
         });
-    }
-    async getSourceMenu() {
-        return App.createDUISection({
-            id: 'root',
-            header: 'Settings',
-            isHidden: false,
-            rows: async () => {
-                return [
-                    (0, eHentaiSettings_1.modifySearch)(this.stateManager),
-                    (0, eHentaiSettings_1.resetSettings)(this.stateManager)
-                ];
-            }
+        const section2 = App.createHomeSection({
+            id: "latest_updates",
+            title: "Derniers Manga Ajoutés",
+            containsMoreItems: false,
+            type: types_1.HomeSectionType.singleRowLarge,
         });
+        const request = App.createRequest({
+            url: `${ScanMangaVFParser_1.DOMAIN}`,
+            method: "GET",
+        });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        section1.items = (0, ScanMangaVFParser_1.getHomePagePopular)($);
+        section2.items = (0, ScanMangaVFParser_1.getHomePageLatest)($);
+        sectionCallback(section1);
+        sectionCallback(section2);
+    }
+    async getViewMoreItems(_homepageSectionId, _metadata) {
+        throw new Error("Requested to getViewMoreItems for a section ID which doesn't exist");
     }
     async getMangaDetails(mangaId) {
-        const data = (await (0, eHentaiHelper_1.getGalleryData)([mangaId], this.requestManager))[0];
-        return App.createSourceManga({
-            id: mangaId,
-            mangaInfo: App.createMangaInfo({
-                titles: [(0, eHentaiParser_1.parseTitle)(data.title), (0, eHentaiParser_1.parseTitle)(data.title_jpn)],
-                image: data.thumb,
-                rating: data.rating,
-                status: 'Completed',
-                artist: (0, eHentaiParser_1.parseArtist)(data.tags),
-                tags: (0, eHentaiParser_1.parseTags)([data.category, ...data.tags]),
-                hentai: !(data.category == 'Non-H' || data.tags.includes('other:non-nude')),
-                desc: 'Last Updated: ' + new Date(parseInt(data.posted) * 1000).toString()
-            })
+        const request = App.createRequest({
+            url: `${ScanMangaVFParser_1.DOMAIN}/manga/${mangaId}`,
+            method: "GET",
         });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        return (0, ScanMangaVFParser_1.getMangaDetails)($, mangaId);
     }
     async getChapters(mangaId) {
-        const data = (await (0, eHentaiHelper_1.getGalleryData)([mangaId], this.requestManager))[0];
-        return [App.createChapter({
-                id: data.filecount,
-                chapNum: 1,
-                //langCode: parseLanguage(data.tags),
-                name: (0, eHentaiParser_1.parseTitle)(data.title),
-                time: new Date(parseInt(data.posted) * 1000)
-            })];
+        const request = App.createRequest({
+            url: `${ScanMangaVFParser_1.DOMAIN}/manga/${mangaId}`,
+            method: "GET",
+        });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        return (0, ScanMangaVFParser_1.getChapters)($);
     }
     async getChapterDetails(mangaId, chapterId) {
+        const request = App.createRequest({
+            url: `${chapterId}`,
+            method: "GET",
+        });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        const pages = (0, ScanMangaVFParser_1.getChapterPages)($);
         return App.createChapterDetails({
             id: chapterId,
             mangaId: mangaId,
-            pages: await (0, eHentaiParser_1.parsePages)(mangaId, parseInt(chapterId), this.requestManager, this.cheerio)
+            pages: pages,
         });
     }
     // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
     async getSearchResults(query, metadata) {
-        const page = metadata?.page ?? 0;
-        let stopSearch = metadata?.stopSearch ?? false;
-        if (stopSearch)
-            return App.createPagedResults({
-                results: [],
-                metadata: {
-                    stopSearch: true
-                }
-            });
-        const includedCategories = query.includedTags?.filter(tag => tag.id.startsWith('category:'));
-        const excludedCategories = query.excludedTags?.filter(tag => tag.id.startsWith('category:'));
-        let categories = 0;
-        if (includedCategories != undefined && includedCategories.length != 0) {
-            categories = includedCategories.map(tag => parseInt(tag.id.substring(9))).reduce((prev, cur) => prev - cur, 1023);
-        }
-        else if (excludedCategories != undefined && excludedCategories.length != 0) {
-            categories = excludedCategories.map(tag => parseInt(tag.id.substring(9))).reduce((prev, cur) => prev + cur, 0);
-        }
-        const results = await (0, eHentaiHelper_1.getSearchData)(query.title, page, categories, this.requestManager, this.cheerio, this.stateManager);
-        if (results[results.length - 1]?.mangaId == 'stopSearch') {
-            results.pop();
-            stopSearch = true;
-        }
+        const searchPage = metadata?.page ?? 1;
+        const search = query.title?.replace(/ /g, "+").replace(/[’'´]/g, "%27") ?? "";
+        const param = `filterList?page=${searchPage}&tag=&alpha=${search}&sortBy=name&asc=true`;
+        const request = App.createRequest({
+            url: `${ScanMangaVFParser_1.DOMAIN}/${param}`,
+            method: "GET",
+        });
+        const response = await this.requestManager.schedule(request, 1);
+        this.CloudFlareError(response.status);
+        const $ = this.cheerio.load(response.data);
+        const albums = (0, ScanMangaVFParser_1.getSearchResults)($);
         return App.createPagedResults({
-            results: results,
-            metadata: {
-                page: page + 1,
-                stopSearch: stopSearch
-            }
+            results: albums,
+            metadata,
+        });
+    }
+    CloudFlareError(status) {
+        if (status == 503 || status == 403) {
+            throw new Error(`CLOUDFLARE BYPASS ERROR:\nPlease go to the homepage of <${exports.ScanMangaVFInfo.name}> and press the cloud icon.`);
+        }
+    }
+    async getCloudflareBypassRequestAsync() {
+        return App.createRequest({
+            url: ScanMangaVFParser_1.DOMAIN,
+            method: "GET",
+            headers: {
+                referer: `${ScanMangaVFParser_1.DOMAIN}/`,
+                "user-agent": await this.requestManager.getDefaultUserAgent(),
+            },
         });
     }
 }
-exports.eHentai = eHentai;
+exports.ScanMangaVF = ScanMangaVF;
 
-},{"./eHentaiHelper":63,"./eHentaiParser":64,"./eHentaiSettings":65,"@paperback/types":61}],63:[function(require,module,exports){
+},{"./ScanMangaVFParser":63,"@paperback/types":61}],63:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSearchData = exports.getGalleryData = void 0;
-const eHentaiParser_1 = require("./eHentaiParser");
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getGalleryData(ids, requestManager) {
-    const request = App.createRequest({
-        url: 'https://api.e-hentai.org/api.php',
-        method: 'POST',
-        headers: {
-            'content-type': 'application/json'
-        },
-        data: {
-            'method': 'gdata',
-            'gidlist': ids.map(id => id.split('/')),
-            'namespace': 1
-        }
-    });
-    const data = await requestManager.schedule(request, 1);
-    const json = (typeof data.data == 'string') ? JSON.parse(data.data.replaceAll(/[\r\n]+/g, ' ')) : data.data;
-    return json.gmetadata;
+exports.getSearchResults = exports.getChapterPages = exports.getChapters = exports.getMangaDetails = exports.getHomePageLatest = exports.getHomePagePopular = exports.getTags = exports.DOMAIN = void 0;
+exports.DOMAIN = "https://scanmanga-vf.me";
+function getTags($) {
+    const arrayTags = [];
+    for (let item of $(".list-category a").toArray()) {
+        let id = ($(item).attr("href") ?? "").split("/").pop() ?? "";
+        let label = capitalizeFirstLetter(decodeHTMLEntity($(item).text()));
+        arrayTags.push(App.createTag({ id, label }));
+    }
+    return arrayTags;
 }
-exports.getGalleryData = getGalleryData;
-async function getSearchData(query, page, categories, requestManager, cheerio, stateManager) {
-    if (query != undefined &&
-        query.length != 0 &&
-        query.split(' ').filter(q => !q.startsWith('-')).length != 0
-        && await stateManager.retrieve('extraSearchArgs')) {
-        query += ` ${await stateManager.retrieve('extraSearchArgs')}`;
+exports.getTags = getTags;
+function getHomePagePopular($) {
+    const items = [];
+    const list = $(".hot-thumbnails li").toArray();
+    console.log("Looking for Popular", list);
+    for (const item of list) {
+        let url = $("a", item).first().attr("href")?.split("/")[4];
+        let image = $("img", item).attr("src");
+        let title = decodeHTMLEntity($(".manga-name a", item).first().text());
+        let subtitle = decodeHTMLEntity($("p", item).text().trim());
+        if (typeof url === "undefined" || typeof image === "undefined")
+            continue;
+        items.push(App.createPartialSourceManga({
+            mangaId: url,
+            image: image,
+            title: title,
+            subtitle: subtitle,
+        }));
     }
-    const request = App.createRequest({
-        url: `https://e-hentai.org/?page=${page}&f_cats=${categories}&f_search=${encodeURIComponent(query ?? '')}`,
-        method: 'GET'
+    return items;
+}
+exports.getHomePagePopular = getHomePagePopular;
+function getHomePageLatest($) {
+    const items = [];
+    const list = $(".mangalist .manga-item").toArray();
+    for (const item of list) {
+        let url = $("a", item).first().attr("href")?.split("/").pop();
+        let image = getMangaThumbnail(url);
+        let title = decodeHTMLEntity($("a", item).first().text());
+        let subtitle = "Chapitre " +
+            decodeHTMLEntity(($("a", item)
+                .eq(1)
+                .text()
+                .trim()
+                .match(/(\d)+[.]?(\d)*/gm) ?? "")[0]);
+        if (typeof url === "undefined" || typeof image === "undefined")
+            continue;
+        items.push(App.createPartialSourceManga({
+            mangaId: url,
+            image: image,
+            title: title,
+            subtitle: subtitle,
+        }));
+    }
+    return items;
+}
+exports.getHomePageLatest = getHomePageLatest;
+function getMangaDetails($, mangaId) {
+    let titles = [decodeHTMLEntity($(".widget-title").eq(0).text().trim())];
+    const image = $(".img-responsive").attr("src") || "";
+    let status = "Unknown", author = "", artist = "";
+    // Details container
+    const panel = $(".dl-horizontal");
+    // Status
+    switch ($('dt:contains("Statut")', panel).next().text().trim()) {
+        case "En cours":
+            status = "Ongoing";
+            break;
+        case "Terminé":
+            status = "Completed";
+            break;
+    }
+    // Other titles
+    let othersTitles = $('dt:contains("Appel\u00E9 aussi")', panel).next().text().trim().split(",");
+    for (let title of othersTitles) {
+        titles.push(decodeHTMLEntity(title.trim()));
+    }
+    // Author & Artist
+    const arrayTags = [];
+    author =
+        $('dt:contains("Auteur(s)")', panel).next().text().trim() != ""
+            ? $('dt:contains("Auteur(s)")', panel).next().text().trim()
+            : "";
+    artist =
+        $('dt:contains("Artist(s)")', panel).next().text().trim() != ""
+            ? $('dt:contains("Artist(s)")', panel).next().text().trim()
+            : "";
+    // Set tags
+    if ($('dt:contains("Catégories")', panel).length > 0) {
+        const categories = $('dt:contains("Catgories")', panel).next().text().trim().split(",") ?? "";
+        for (const category of categories) {
+            const label = capitalizeFirstLetter(decodeHTMLEntity(category.trim()));
+            const id = category.replace(" ", "-").toLowerCase().trim() ?? label;
+            arrayTags.push({ id: id, label: label });
+        }
+    }
+    // Tags
+    if ($('dt:contains("Genres")', panel).length > 0) {
+        const tags = $('dt:contains("Genres")', panel).next().text().trim().split(",");
+        for (const tag of tags) {
+            const label = tag.replace(/(\r\n|\n|\r)/gm, "").trim();
+            const id = tag
+                .replace(/(\r\n|\n|\r)/gm, "")
+                .trim()
+                .replace(" ", "-")
+                .toLowerCase() ?? label;
+            if (!arrayTags.includes({ id: id, label: label })) {
+                arrayTags.push({ id: id, label: label });
+            }
+        }
+    }
+    const tagSections = [
+        App.createTagSection({ id: "0", label: "Genres", tags: arrayTags.map((x) => App.createTag(x)) }),
+    ];
+    const desc = decodeHTMLEntity($(".well").children("p").text().trim());
+    return App.createSourceManga({
+        id: mangaId,
+        mangaInfo: App.createMangaInfo({
+            titles,
+            image,
+            status,
+            artist,
+            author,
+            tags: tagSections,
+            desc: desc,
+        }),
     });
-    const data = await requestManager.schedule(request, 1);
-    const $ = cheerio.load(data.data);
-    const searchResults = $('td.glname').toArray();
-    const mangaIds = [];
-    for (const manga of searchResults) {
-        const splitURL = ($('a', manga).attr('href') ?? '/////').split('/');
-        mangaIds.push(`${splitURL[4]}/${splitURL[5]}`);
+}
+exports.getMangaDetails = getMangaDetails;
+function getChapters($) {
+    const chapters = [];
+    const arrChapters = $(".chapters li:not(.volume)").toArray();
+    for (const chapter of arrChapters) {
+        const id = $("a", chapter).attr("href") ?? "";
+        const name = "Chapitre " + decodeHTMLEntity($("a", chapter).text().split(" ").pop() ?? "");
+        const chapNum = Number(id.split("/").pop());
+        const time = new Date($(".date-chapter-title-rtl", chapter).text() ?? "");
+        chapters.push(App.createChapter({
+            id,
+            name,
+            langCode: "French",
+            chapNum,
+            time,
+        }));
     }
-    const json = mangaIds.length != 0 ? await getGalleryData(mangaIds, requestManager) : [];
+    return chapters;
+}
+exports.getChapters = getChapters;
+function getChapterPages($) {
+    const pages = [];
+    const chapterList = $("#all img").toArray();
+    for (const obj of chapterList) {
+        const imageUrl = $(obj).attr("data-src");
+        if (!imageUrl)
+            continue;
+        pages.push(imageUrl.trim());
+    }
+    return pages;
+}
+exports.getChapterPages = getChapterPages;
+function getSearchResults($) {
     const results = [];
-    for (const entry of json) {
+    for (const item of $(".media").toArray()) {
+        const url = $("h5 a", item).attr("href")?.split("/")[4];
+        const image = $("img", item).attr("src");
+        const title = decodeHTMLEntity($("h5", item).text());
+        const subtitle = "Chapitre " + decodeHTMLEntity($("a", item).eq(2).text().trim().replace(/#/g, ""));
+        if (typeof url === "undefined" || typeof image === "undefined")
+            continue;
         results.push(App.createPartialSourceManga({
-            mangaId: `${entry.gid}/${entry.token}`,
-            title: (0, eHentaiParser_1.parseTitle)(entry.title),
-            image: entry.thumb
+            mangaId: url,
+            image: image,
+            title: title,
+            subtitle: subtitle,
         }));
     }
-    if ($('div.ptt').last().hasClass('ptdd'))
-        results.push(App.createPartialSourceManga({
-            mangaId: 'stopSearch',
-            title: '',
-            image: ''
-        }));
     return results;
 }
-exports.getSearchData = getSearchData;
-
-},{"./eHentaiParser":64}],64:[function(require,module,exports){
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.parseTitle = exports.parseTags = exports.parsePages = exports.parseArtist = void 0;
-const parseArtist = (tags) => {
-    const artist = tags.filter(tag => tag.startsWith('artist:')).map(tag => tag.substring(7));
-    const cosplayer = tags.filter(tag => tag.startsWith('cosplayer:')).map(tag => tag.substring(10));
-    if (artist.length != 0)
-        return artist[0];
-    else if (cosplayer.length != 0)
-        return cosplayer[0];
-    else
-        return undefined;
-};
-exports.parseArtist = parseArtist;
-// export const parseLanguage = (tags: string[]): LanguageCode => {
-//     const languageTags = tags.filter(tag => tag.startsWith('language:') && tag != 'language:translated').map(tag => tag.substring(9));
-//     if (languageTags.length == 0) return LanguageCode.JAPANESE;
-//     switch (languageTags[0]) {
-//         case 'bengali': return LanguageCode.BENGALI; break;
-//         case 'bulgarian': return LanguageCode.BULGARIAN; break;
-//         case 'chinese': return LanguageCode.CHINEESE; break;
-//         case 'czech': return LanguageCode.CZECH; break;
-//         case 'danish': return LanguageCode.DANISH; break;
-//         case 'dutch': return LanguageCode.DUTCH; break;
-//         case 'english': return LanguageCode.ENGLISH; break;
-//         case 'finnish': return LanguageCode.FINNISH; break;
-//         case 'french': return LanguageCode.FRENCH; break;
-//         case 'german': return LanguageCode.GERMAN; break;
-//         case 'greek': return LanguageCode.GREEK; break;
-//         case 'hungarian': return LanguageCode.HUNGARIAN; break;
-//         case 'gujarati': case 'nepali': case 'punjabi': case 'tamil': case 'telugu': case 'urdu': return LanguageCode.INDIAN; break;
-//         case 'indonesian': return LanguageCode.INDONESIAN; break;
-//         case 'persian': return LanguageCode.IRAN; break;
-//         case 'italian': return LanguageCode.ITALIAN; break;
-//         case 'korean': return LanguageCode.KOREAN; break;
-//         case 'mongolian': return LanguageCode.MONGOLIAN; break;
-//         case 'norwegian': return LanguageCode.NORWEGIAN; break;
-//         case 'cebuano': case 'tagalog': return LanguageCode.PHILIPPINE; break;
-//         case 'polish': return LanguageCode.POLISH; break;
-//         case 'portuguese': return LanguageCode.PORTUGUESE; break;
-//         case 'romanian': return LanguageCode.ROMANIAN; break;
-//         case 'russian': return LanguageCode.RUSSIAN; break;
-//         case 'sanskrit': return LanguageCode.SANSKRIT; break;
-//         case 'spanish': return LanguageCode.SPANISH; break;
-//         case 'thai': return LanguageCode.THAI; break;
-//         case 'turkish': return LanguageCode.TURKISH; break;
-//         case 'ukrainian': return LanguageCode.UKRAINIAN; break;
-//         case 'vietnamese': return LanguageCode.VIETNAMESE; break;
-//         case 'welsh': return LanguageCode.WELSH; break;
-//     }
-//     return LanguageCode.UNKNOWN;
-// };
-async function getImage(url, requestManager, cheerio) {
-    const request = App.createRequest({
-        url: url,
-        method: 'GET'
+exports.getSearchResults = getSearchResults;
+function decodeHTMLEntity(str) {
+    return str.replace(/&#(\d+);/g, function (_match, dec) {
+        return String.fromCharCode(dec);
     });
-    const data = await requestManager.schedule(request, 1);
-    const $ = cheerio.load(data.data);
-    return $('#img').attr('src') ?? '';
 }
-async function parsePage(id, page, requestManager, cheerio) {
-    const request = App.createRequest({
-        url: `https://e-hentai.org/g/${id}/?p=${page}`,
-        method: 'GET'
-    });
-    const data = await requestManager.schedule(request, 1);
-    const $ = cheerio.load(data.data);
-    const pageArr = [];
-    const pageDivArr = $('div.gdtm').toArray();
-    for (const page of pageDivArr) {
-        pageArr.push(getImage($('a', page).attr('href') ?? '', requestManager, cheerio));
-    }
-    return Promise.all(pageArr);
+function capitalizeFirstLetter(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
-async function parsePages(id, pageCount, requestManager, cheerio) {
-    const pageArr = [];
-    for (let i = 0; i <= pageCount / 40; i++) {
-        pageArr.push(parsePage(id, i, requestManager, cheerio));
-    }
-    return Promise.all(pageArr).then(pages => pages.reduce((prev, cur) => [...prev, ...cur], []));
+function getMangaThumbnail(mangaID) {
+    return `${exports.DOMAIN}/uploads/manga/${mangaID}.jpg`;
 }
-exports.parsePages = parsePages;
-const namespaceHasTags = (namespace, tags) => { return tags.filter(tag => tag.startsWith(`${namespace}:`)).length != 0; };
-const createTagSectionForNamespace = (namespace, tags) => {
-    return App.createTagSection({ id: namespace, label: namespace, tags: tags.filter(tag => tag.startsWith(`${namespace}:`))
-            .map(tag => App.createTag({ id: tag, label: tag.substring(namespace.length + 1) })) });
-};
-const parseTags = (tags) => {
-    const tagSectionArr = [];
-    switch (tags.shift()) {
-        case 'Doujinshi':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:2', label: 'Doujinshi' })] }));
-            break;
-        case 'Manga':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:4', label: 'Manga' })] }));
-            break;
-        case 'Artist CG':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:8', label: 'Artist CG' })] }));
-            break;
-        case 'Game CG':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:16', label: 'Game CG' })] }));
-            break;
-        case 'Non-H':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:256', label: 'Non-H' })] }));
-            break;
-        case 'Image Set':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:32', label: 'Image Set' })] }));
-            break;
-        case 'Western':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:512', label: 'Western' })] }));
-            break;
-        case 'Cosplay':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:64', label: 'Cosplay' })] }));
-            break;
-        case 'Asian Porn':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:128', label: 'Asian Porn' })] }));
-            break;
-        case 'Misc':
-            tagSectionArr.push(App.createTagSection({ id: 'categories', label: 'categories', tags: [App.createTag({ id: 'category:1', label: 'Misc' })] }));
-            break;
-    }
-    if (namespaceHasTags('character', tags))
-        tagSectionArr.push(createTagSectionForNamespace('character', tags));
-    if (namespaceHasTags('female', tags))
-        tagSectionArr.push(createTagSectionForNamespace('female', tags));
-    if (namespaceHasTags('male', tags))
-        tagSectionArr.push(createTagSectionForNamespace('male', tags));
-    if (namespaceHasTags('mixed', tags))
-        tagSectionArr.push(createTagSectionForNamespace('mixed', tags));
-    if (namespaceHasTags('other', tags))
-        tagSectionArr.push(createTagSectionForNamespace('other', tags));
-    if (namespaceHasTags('parody', tags))
-        tagSectionArr.push(createTagSectionForNamespace('parody', tags));
-    return tagSectionArr;
-};
-exports.parseTags = parseTags;
-const parseTitle = (title) => {
-    return title.replaceAll(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec));
-};
-exports.parseTitle = parseTitle;
-
-},{}],65:[function(require,module,exports){
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.resetSettings = exports.modifySearch = void 0;
-const modifySearch = (stateManager) => {
-    return App.createDUINavigationButton({
-        id: 'modifySearch',
-        label: 'Modify Search',
-        form: App.createDUIForm({
-            onSubmit: async (values) => {
-                stateManager.store('extraSearchArgs', values.extraSearchArgs.replace(/[“”‘’]/g, '"'));
-            },
-            sections: async () => {
-                return [App.createDUISection({
-                        id: 'modifySearchSection',
-                        isHidden: false,
-                        footer: 'Note: searches with only exclusions do not work, including on the home page',
-                        rows: async () => {
-                            return [App.createDUIInputField({
-                                    id: 'extraSearchArgs',
-                                    value: App.createDUIBinding(await stateManager.retrieve('extraSearchArgs') ?? ''),
-                                    label: 'Extra Args:'
-                                })];
-                        }
-                    })];
-            }
-        })
-    });
-};
-exports.modifySearch = modifySearch;
-const resetSettings = (stateManager) => {
-    return App.createDUIButton({
-        id: 'resetSettings',
-        label: 'Reset to Default',
-        onTap: async () => {
-            stateManager.store('extraSearchArgs', null);
-        }
-    });
-};
-exports.resetSettings = resetSettings;
 
 },{}]},{},[62])(62)
 });
